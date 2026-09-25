@@ -21,6 +21,8 @@ pub struct Event {
     pub location: Option<String>,
     pub description: Option<String>,
     pub html_link: Option<String>,
+    /// Google Meet の URL
+    pub hangout_link: Option<String>,
     #[serde(default, skip_serializing)]
     pub attendees: Vec<Attendee>,
     #[serde(skip_deserializing)]
@@ -109,7 +111,10 @@ impl Event {
 
     pub fn detail(&self) -> String {
         let mut s = format!("{}\n\n{}\n{}", self.summary, self.line(), self.account);
-        for v in [&self.location, &self.description].into_iter().flatten() {
+        for v in [&self.hangout_link, &self.location, &self.description]
+            .into_iter()
+            .flatten()
+        {
             s += &format!("\n\n{v}");
         }
         s
@@ -273,10 +278,11 @@ fn declined() {
 #[test]
 fn json_output() {
     let mut e: Event =
-        serde_json::from_str(r#"{"id":"x","start":{"date":"2026-09-26"},"attendees":[]}"#).unwrap();
+        serde_json::from_str(r#"{"id":"x","start":{"date":"2026-09-26"},"attendees":[],"hangoutLink":"https://meet.google.com/abc"}"#).unwrap();
     e.account = "work".into();
     let v = serde_json::to_value(&e).unwrap();
     assert_eq!(v["account"], "work");
     assert_eq!(v["start"]["date"], "2026-09-26");
     assert!(v.get("attendees").is_none());
+    assert_eq!(v["hangoutLink"], "https://meet.google.com/abc");
 }
