@@ -14,6 +14,9 @@ use std::path::PathBuf;
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
+    /// 結果を JSON で出力（list / add / edit / delete / accounts）
+    #[arg(long, global = true)]
+    json: bool,
 }
 
 #[derive(Subcommand)]
@@ -71,42 +74,77 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
-    match Cli::parse().cmd {
+    let Cli { cmd, json } = Cli::parse();
+    match cmd {
         None | Some(Cmd::Tui) => tui::run()?,
         Some(Cmd::Init { path }) => auth::init(&path)?,
         Some(Cmd::Login { name }) => auth::login(&name)?,
         Some(Cmd::Logout { name }) => auth::logout(&name)?,
+        Some(Cmd::Accounts) if json => print_json(&auth::accounts()?)?,
         Some(Cmd::Accounts) => auth::accounts()?.iter().for_each(|a| println!("{a}")),
-        Some(Cmd::List { days, account, all, ids }) => {
+        Some(Cmd::List {
+            days,
+            account,
+            all,
+            ids,
+        }) => {
             let accounts = match account {
                 Some(a) => vec![a],
                 None => auth::accounts()?,
             };
             let (events, errors) = api::list_all(&accounts, Local::now().date_naive(), days);
-            for e in events.iter().filter(|e| all || !e.declined()) {
-                if ids { println!("{}  {}", e.line(), e.id) } else { println!("{}", e.line()) }
+            let events: Vec<_> = events.iter().filter(|e| all || !e.declined()).collect();
+            if json {
+                print_json(&events)?;
+            } else {
+                for e in events {
+                    if ids {
+                        println!("{}  {}", e.line(), e.id)
+                    } else {
+                        println!("{}", e.line())
+                    }
+                }
             }
             errors.iter().for_each(|e| eprintln!("エラー {e}"));
         }
-        Some(Cmd::Add { title, start, end, account }) => {
+        Some(Cmd::Add {
+            title,
+            start,
+            end,
+            account,
+        }) => {
             let p = Patch {
                 summary: Some(title),
                 start: Some(When::parse(&start, false)?),
                 end: Some(When::parse(&end, true)?),
             };
-            println!("追加しました: {}", api::save(&pick(account)?, None, &p)?.line());
+            show(json, "追加しました", &api::save(&pick(account)?, None, &p)?)?;
         }
-        Some(Cmd::Edit { id, title, start, end, account }) => {
+        Some(Cmd::Edit {
+            id,
+            title,
+            start,
+            end,
+            account,
+        }) => {
             let p = Patch {
                 summary: title,
                 start: start.map(|s| When::parse(&s, false)).transpose()?,
                 end: end.map(|s| When::parse(&s, true)).transpose()?,
             };
-            println!("更新しました: {}", api::save(&pick(account)?, Some(&id), &p)?.line());
+            show(
+                json,
+                "更新しました",
+                &api::save(&pick(account)?, Some(&id), &p)?,
+            )?;
         }
         Some(Cmd::Delete { id, account }) => {
             api::delete(&pick(account)?, &id)?;
-            println!("削除しました");
+            if json {
+                print_json(&serde_json::json!({ "id": id, "deleted": true }))?;
+            } else {
+                println!("削除しました");
+            }
         }
     }
     Ok(())
@@ -122,4 +160,17 @@ fn pick(account: Option<String>) -> Result<String> {
         [only] => Ok(only.clone()),
         all => bail!("-a でアカウントを指定してください: {}", all.join(", ")),
     }
+}
+
+fn print_json(v: &impl serde::Serialize) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(v)?);
+    Ok(())
+}
+
+fn show(json: bool, msg: &str, e: &api::Event) -> Result<()> {
+    if json {
+        return print_json(e);
+    }
+    println!("{msg}: {}", e.line());
+    Ok(())
 }

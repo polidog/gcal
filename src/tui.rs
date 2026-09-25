@@ -11,7 +11,8 @@ use ratatui::{DefaultTerminal, Frame};
 
 const DAYS: i64 = 7;
 const HELP: &str = " j/k:移動 h/l:前後の週 t:今日 Tab:アカウント a:追加 e:編集 d:削除 x:不参加も表示 r:再読込 o:ブラウザ q:終了";
-const FORM_HELP: &str = " Tab/↑↓:項目移動 Enter:保存 Esc:やめる  日時は 2026-09-26 10:00 / 終日なら 2026-09-26";
+const FORM_HELP: &str =
+    " Tab/↑↓:項目移動 Enter:保存 Esc:やめる  日時は 2026-09-26 10:00 / 終日なら 2026-09-26";
 const LABELS: [&str; 3] = ["タイトル", "開始", "終了"];
 
 enum Mode {
@@ -89,7 +90,9 @@ impl App {
     fn run(&mut self, term: &mut DefaultTerminal) -> Result<()> {
         loop {
             term.draw(|f| self.draw(f))?;
-            let Term::Key(k) = event::read()? else { continue };
+            let Term::Key(k) = event::read()? else {
+                continue;
+            };
             if k.kind != KeyEventKind::Press {
                 continue;
             }
@@ -151,7 +154,12 @@ impl App {
                 if let Some(e) = self.selected() {
                     let fields = [e.summary.clone(), e.start.input(false), e.end.input(true)];
                     let (account, id) = (e.account.clone(), Some(e.id.clone()));
-                    self.mode = Mode::Form(Form { account, id, fields, focus: 0 });
+                    self.mode = Mode::Form(Form {
+                        account,
+                        id,
+                        fields,
+                        focus: 0,
+                    });
                     self.status.clear();
                 }
             }
@@ -177,9 +185,16 @@ impl App {
             (i, _) => self.accounts[i - 1].clone(),
         };
         // 選択中の予定の日付を初期値にする（時刻だけ打てばよいように）
-        let day = self.selected().map_or(self.from, |e| e.start.local().date_naive());
+        let day = self
+            .selected()
+            .map_or(self.from, |e| e.start.local().date_naive());
         let fields = [String::new(), format!("{day} "), format!("{day} ")];
-        self.mode = Mode::Form(Form { account, id: None, fields, focus: 0 });
+        self.mode = Mode::Form(Form {
+            account,
+            id: None,
+            fields,
+            focus: 0,
+        });
         self.status.clear();
     }
 
@@ -211,14 +226,32 @@ impl App {
     }
 
     fn draw(&mut self, f: &mut Frame) {
-        let [top, main, bottom] =
-            Layout::vertical([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
-        let [left, right] = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(main);
+        let [top, main, bottom] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .areas(f.area());
+        let [left, right] =
+            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .areas(main);
 
-        let who = if self.filter == 0 { "全アカウント" } else { &self.accounts[self.filter - 1] };
+        let who = if self.filter == 0 {
+            "全アカウント"
+        } else {
+            &self.accounts[self.filter - 1]
+        };
         let to = self.from + Duration::days(DAYS - 1);
-        let declined = if self.show_declined { "  不参加も表示中" } else { "" };
-        let title = format!(" gcal  {who}  {} 〜 {}{declined}", self.from.format("%m/%d"), to.format("%m/%d"));
+        let declined = if self.show_declined {
+            "  不参加も表示中"
+        } else {
+            ""
+        };
+        let title = format!(
+            " gcal  {who}  {} 〜 {}{declined}",
+            self.from.format("%m/%d"),
+            to.format("%m/%d")
+        );
         f.render_widget(Line::from(title).bold(), top);
 
         let items: Vec<String> = self.visible().iter().map(|e| e.line()).collect();
@@ -229,7 +262,9 @@ impl App {
             .highlight_symbol("> ");
         f.render_stateful_widget(list, left, &mut self.state);
         f.render_widget(
-            Paragraph::new(detail).wrap(Wrap { trim: false }).block(Block::bordered().title("詳細")),
+            Paragraph::new(detail)
+                .wrap(Wrap { trim: false })
+                .block(Block::bordered().title("詳細")),
             right,
         );
 
@@ -241,8 +276,12 @@ impl App {
         f.render_widget(footer, bottom);
 
         if let Mode::Form(form) = &self.mode {
-            let [area] = Layout::vertical([Constraint::Length(5)]).flex(Flex::Center).areas(f.area());
-            let [area] = Layout::horizontal([Constraint::Length(64)]).flex(Flex::Center).areas(area);
+            let [area] = Layout::vertical([Constraint::Length(5)])
+                .flex(Flex::Center)
+                .areas(f.area());
+            let [area] = Layout::horizontal([Constraint::Length(64)])
+                .flex(Flex::Center)
+                .areas(area);
             let lines: Vec<Line> = LABELS
                 .iter()
                 .zip(&form.fields)
@@ -252,9 +291,20 @@ impl App {
                     false => Line::from(format!("{label:　<4} {value}")),
                 })
                 .collect();
-            let title = format!(" {} [{}] ", if form.id.is_some() { "編集" } else { "追加" }, form.account);
+            let title = format!(
+                " {} [{}] ",
+                if form.id.is_some() {
+                    "編集"
+                } else {
+                    "追加"
+                },
+                form.account
+            );
             f.render_widget(Clear, area);
-            f.render_widget(Paragraph::new(lines).block(Block::bordered().title(title)), area);
+            f.render_widget(
+                Paragraph::new(lines).block(Block::bordered().title(title)),
+                area,
+            );
         }
     }
 }

@@ -62,7 +62,10 @@ pub fn init(path: &Path) -> Result<()> {
     }
     let s: Secret = serde_json::from_str(&fs::read_to_string(path)?)
         .context("デスクトップアプリ用の client_secret.json ではありません")?;
-    write_private(&dir().join("client.json"), &serde_json::to_string(&s.installed)?)?;
+    write_private(
+        &dir().join("client.json"),
+        &serde_json::to_string(&s.installed)?,
+    )?;
     println!("登録しました。次は gcal login <アカウント名>");
     Ok(())
 }
@@ -74,7 +77,9 @@ fn client() -> Result<Client> {
 }
 
 pub fn accounts() -> Result<Vec<String>> {
-    let Ok(rd) = fs::read_dir(dir().join("accounts")) else { return Ok(vec![]) };
+    let Ok(rd) = fs::read_dir(dir().join("accounts")) else {
+        return Ok(vec![]);
+    };
     let mut v: Vec<String> = rd
         .filter_map(|e| Some(e.ok()?.path().file_stem()?.to_str()?.to_string()))
         .collect();
@@ -91,7 +96,11 @@ pub fn login(name: &str) -> Result<()> {
     let c = client()?;
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let redirect = format!("http://127.0.0.1:{}", listener.local_addr()?.port());
-    let state = format!("{:x}{:x}", RandomState::new().hash_one(0), RandomState::new().hash_one(1));
+    let state = format!(
+        "{:x}{:x}",
+        RandomState::new().hash_one(0),
+        RandomState::new().hash_one(1)
+    );
     let url = format!(
         "{AUTH_URL}?response_type=code&access_type=offline&prompt=consent&client_id={}&redirect_uri={}&scope={}&state={state}",
         enc(&c.client_id),
@@ -106,16 +115,28 @@ pub fn login(name: &str) -> Result<()> {
         let (stream, _) = listener.accept()?;
         let mut line = String::new();
         BufReader::new(&stream).read_line(&mut line)?;
-        if let Some((_, q)) = line.split_whitespace().nth(1).and_then(|p| p.split_once('?')) {
-            if q.contains("code=") || q.contains("error=") {
-                break (q.to_string(), stream);
-            }
+        if let Some((_, q)) = line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|p| p.split_once('?'))
+            && (q.contains("code=") || q.contains("error="))
+        {
+            break (q.to_string(), stream);
         }
     };
     let code = param(&query, "code").filter(|_| param(&query, "state").as_deref() == Some(&state));
-    let msg = if code.is_some() { "gcal: ログインしました。このタブは閉じて大丈夫です" } else { "gcal: ログインに失敗しました" };
-    let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<h1>{msg}</h1>");
-    let Some(code) = code else { bail!("認可に失敗しました: {query}") };
+    let msg = if code.is_some() {
+        "gcal: ログインしました。このタブは閉じて大丈夫です"
+    } else {
+        "gcal: ログインに失敗しました"
+    };
+    let _ = write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<h1>{msg}</h1>"
+    );
+    let Some(code) = code else {
+        bail!("認可に失敗しました: {query}")
+    };
 
     let r: TokenResp = json(agent().post(TOKEN_URL).send_form([
         ("grant_type", "authorization_code"),
@@ -126,7 +147,9 @@ pub fn login(name: &str) -> Result<()> {
     ])?)?;
     let t = Token {
         access_token: r.access_token,
-        refresh_token: r.refresh_token.context("refresh_token が返りませんでした")?,
+        refresh_token: r
+            .refresh_token
+            .context("refresh_token が返りませんでした")?,
         expires_at: Utc::now().timestamp() + r.expires_in - 60,
     };
     write_private(&account_path(name), &serde_json::to_string(&t)?)?;
@@ -157,7 +180,13 @@ pub fn access_token(name: &str) -> Result<String> {
 }
 
 pub fn open_browser(url: &str) {
-    let cmd = if cfg!(target_os = "macos") { "open" } else if cfg!(windows) { "explorer" } else { "xdg-open" };
+    let cmd = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
     let _ = std::process::Command::new(cmd)
         .arg(url)
         .stdout(std::process::Stdio::null())
@@ -166,13 +195,18 @@ pub fn open_browser(url: &str) {
 }
 
 fn param(query: &str, key: &str) -> Option<String> {
-    query.split('&').find_map(|kv| kv.strip_prefix(key)?.strip_prefix('=')).map(dec)
+    query
+        .split('&')
+        .find_map(|kv| kv.strip_prefix(key)?.strip_prefix('='))
+        .map(dec)
 }
 
 fn enc(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
             _ => format!("%{b:02X}"),
         })
         .collect()

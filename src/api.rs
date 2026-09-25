@@ -7,7 +7,7 @@ use ureq::{Agent, Body, http::Response};
 
 const EVENTS: &str = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
     #[serde(default)]
@@ -21,9 +21,9 @@ pub struct Event {
     pub location: Option<String>,
     pub description: Option<String>,
     pub html_link: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub attendees: Vec<Attendee>,
-    #[serde(skip)]
+    #[serde(skip_deserializing)]
     pub account: String,
 }
 
@@ -55,12 +55,22 @@ impl When {
     /// "2026-09-26 10:00" は時刻指定、"2026-09-26" は終日（end は当日を含む）
     pub fn parse(s: &str, is_end: bool) -> Result<When> {
         if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M") {
-            let dt = dt.and_local_timezone(Local).earliest().context("存在しない時刻です")?;
-            return Ok(When { date_time: Some(dt.fixed_offset()), date: None });
+            let dt = dt
+                .and_local_timezone(Local)
+                .earliest()
+                .context("存在しない時刻です")?;
+            return Ok(When {
+                date_time: Some(dt.fixed_offset()),
+                date: None,
+            });
         }
-        let d = NaiveDate::parse_from_str(s, "%Y-%m-%d")
-            .with_context(|| format!("日時の形式が不正: {s}（例: \"2026-09-26 10:00\" / 2026-09-26）"))?;
-        Ok(When { date_time: None, date: Some(if is_end { d + Duration::days(1) } else { d }) })
+        let d = NaiveDate::parse_from_str(s, "%Y-%m-%d").with_context(|| {
+            format!("日時の形式が不正: {s}（例: \"2026-09-26 10:00\" / 2026-09-26）")
+        })?;
+        Ok(When {
+            date_time: None,
+            date: Some(if is_end { d + Duration::days(1) } else { d }),
+        })
     }
 
     /// parse の逆。編集フォームの初期値に使う
@@ -76,18 +86,25 @@ impl When {
 impl Event {
     /// 自分が「不参加」と返事した予定
     pub fn declined(&self) -> bool {
-        self.attendees.iter().any(|a| a.is_self && a.response_status.as_deref() == Some("declined"))
+        self.attendees
+            .iter()
+            .any(|a| a.is_self && a.response_status.as_deref() == Some("declined"))
     }
 
     pub fn line(&self) -> String {
         let s = self.start.local();
-        let wd = ["月", "火", "水", "木", "金", "土", "日"][s.weekday().num_days_from_monday() as usize];
+        let wd =
+            ["月", "火", "水", "木", "金", "土", "日"][s.weekday().num_days_from_monday() as usize];
         let time = match self.start.date_time {
             Some(_) => format!("{}-{}", s.format("%H:%M"), self.end.local().format("%H:%M")),
             None => "終日       ".into(),
         };
-        let mark = if self.declined() { " (不参加)" } else { "" };
-        format!("{}({wd}) {time} [{}] {}{mark}", s.format("%m/%d"), self.account, self.summary)
+        format!(
+            "{}({wd}) {time} [{}] {}",
+            s.format("%m/%d"),
+            self.account,
+            self.summary
+        )
     }
 
     pub fn detail(&self) -> String {
@@ -100,11 +117,18 @@ impl Event {
 }
 
 pub fn midnight(d: NaiveDate) -> DateTime<Local> {
-    d.and_hms_opt(0, 0, 0).unwrap().and_local_timezone(Local).earliest().expect("深夜0時が存在しないタイムゾーン")
+    d.and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_local_timezone(Local)
+        .earliest()
+        .expect("深夜0時が存在しないタイムゾーン")
 }
 
 pub fn agent() -> Agent {
-    Agent::config_builder().http_status_as_error(false).build().into()
+    Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .into()
 }
 
 /// エラー時は Google が返す本文（API 未有効化などの理由）をそのまま見せる
@@ -128,7 +152,10 @@ fn list(account: &str, from: NaiveDate, days: i64) -> Result<Vec<Event>> {
         next_page_token: Option<String>,
     }
     let token = auth::access_token(account)?;
-    let (min, max) = (midnight(from).to_rfc3339(), midnight(from + Duration::days(days)).to_rfc3339());
+    let (min, max) = (
+        midnight(from).to_rfc3339(),
+        midnight(from + Duration::days(days)).to_rfc3339(),
+    );
     let mut out = vec![];
     let mut page_token = None;
     loop {
@@ -184,8 +211,14 @@ pub struct Patch {
 pub fn save(account: &str, id: Option<&str>, p: &Patch) -> Result<Event> {
     let auth = format!("Bearer {}", auth::access_token(account)?);
     let res = match id {
-        None => agent().post(EVENTS).header("Authorization", auth).send_json(p)?,
-        Some(id) => agent().patch(format!("{EVENTS}/{id}")).header("Authorization", auth).send_json(p)?,
+        None => agent()
+            .post(EVENTS)
+            .header("Authorization", auth)
+            .send_json(p)?,
+        Some(id) => agent()
+            .patch(format!("{EVENTS}/{id}"))
+            .header("Authorization", auth)
+            .send_json(p)?,
     };
     let mut e: Event = json(res)?;
     e.account = account.into();
@@ -194,16 +227,32 @@ pub fn save(account: &str, id: Option<&str>, p: &Patch) -> Result<Event> {
 
 pub fn delete(account: &str, id: &str) -> Result<()> {
     let auth = format!("Bearer {}", auth::access_token(account)?);
-    check(agent().delete(format!("{EVENTS}/{id}")).header("Authorization", auth).call()?)?;
+    check(
+        agent()
+            .delete(format!("{EVENTS}/{id}"))
+            .header("Authorization", auth)
+            .call()?,
+    )?;
     Ok(())
 }
 
 #[test]
 fn when_roundtrip() {
-    for (s, is_end) in [("2026-09-26 10:00", false), ("2026-09-26", false), ("2026-09-26", true)] {
+    for (s, is_end) in [
+        ("2026-09-26 10:00", false),
+        ("2026-09-26", false),
+        ("2026-09-26", true),
+    ] {
         assert_eq!(When::parse(s, is_end).unwrap().input(is_end), s);
     }
-    assert_eq!(When::parse("2026-09-26", true).unwrap().date.unwrap().to_string(), "2026-09-27");
+    assert_eq!(
+        When::parse("2026-09-26", true)
+            .unwrap()
+            .date
+            .unwrap()
+            .to_string(),
+        "2026-09-27"
+    );
     assert!(When::parse("09/26", false).is_err());
 }
 
@@ -214,7 +263,20 @@ fn declined() {
     )
     .unwrap();
     assert!(!e.declined());
-    let e: Event = serde_json::from_str(r#"{"attendees":[{"self":true,"responseStatus":"declined"}]}"#).unwrap();
+    let e: Event =
+        serde_json::from_str(r#"{"attendees":[{"self":true,"responseStatus":"declined"}]}"#)
+            .unwrap();
     assert!(e.declined());
     assert!(!serde_json::from_str::<Event>("{}").unwrap().declined());
+}
+
+#[test]
+fn json_output() {
+    let mut e: Event =
+        serde_json::from_str(r#"{"id":"x","start":{"date":"2026-09-26"},"attendees":[]}"#).unwrap();
+    e.account = "work".into();
+    let v = serde_json::to_value(&e).unwrap();
+    assert_eq!(v["account"], "work");
+    assert_eq!(v["start"]["date"], "2026-09-26");
+    assert!(v.get("attendees").is_none());
 }
