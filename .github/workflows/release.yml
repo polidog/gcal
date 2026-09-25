@@ -46,7 +46,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: gcal-*.*
+          path: |
+            gcal-*.tar.gz
+            gcal-*.zip
 
   release:
     needs: build
