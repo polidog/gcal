@@ -11,6 +11,11 @@ A lightweight Google Calendar client for the terminal, written in Rust.
 
 ## Install
 
+Download a binary for your OS from [Releases](https://github.com/polidog/gcal/releases) and put `gcal` somewhere on your `PATH`.
+Linux builds are statically linked, so they run on any distribution.
+
+Or build from source:
+
 ```sh
 cargo install --git https://github.com/polidog/gcal
 ```
@@ -46,6 +51,7 @@ gcal list                      # next 7 days, all accounts
 gcal list -d 14 -a work        # 14 days, one account
 gcal list --all                # include events you declined
 gcal list --ids                # show event IDs (for edit/delete)
+gcal list --json | jq '.[].summary'   # JSON output
 
 gcal add "Meeting" "2026-09-26 10:00" "2026-09-26 11:00" -a work
 gcal add "Holiday" 2026-09-28 2026-09-29        # all-day (end date is inclusive)
@@ -59,6 +65,7 @@ gcal logout work               # remove an account
 ```
 
 `-a` can be omitted when you have only one account.
+`--json` works with `list`, `add`, `edit`, `delete` and `accounts`.
 
 ### TUI
 
@@ -93,3 +100,7 @@ In the add/edit form, use `Tab` / `↑↓` to move between fields, `Enter` to sa
 
 - Only each account's **primary** calendar is shown.
 - Editing or deleting a recurring event affects only that single occurrence.
+
+## License
+
+MIT

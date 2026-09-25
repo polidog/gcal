@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 description = "Lightweight Google Calendar CLI/TUI with multi-account support"
 repository = "https://github.com/polidog/gcal"
+license = "MIT"
+keywords = ["google-calendar", "cli", "tui", "calendar"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow = "1.0.104"

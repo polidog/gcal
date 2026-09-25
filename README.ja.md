@@ -11,6 +11,11 @@ Rust で書いた、ターミナル用の軽量 Google カレンダークライ�
 
 ## インストール
 
+[Releases](https://github.com/polidog/gcal/releases) から OS に合ったバイナリをダウンロードし、`gcal` を `PATH` の通った場所に置いてください。
+Linux 版は静的リンクなので、どのディストリビューションでも動きます。
+
+ソースからビルドする場合：
+
 ```sh
 cargo install --git https://github.com/polidog/gcal
 ```
@@ -46,6 +51,7 @@ gcal list                      # 今日から7日分、全アカウント
 gcal list -d 14 -a work        # 14日分、1アカウントだけ
 gcal list --all                # 不参加と返事した予定も表示
 gcal list --ids                # 予定 ID も表示（編集・削除で使う）
+gcal list --json | jq '.[].summary'   # JSON で出力
 
 gcal add 打ち合わせ "2026-09-26 10:00" "2026-09-26 11:00" -a work
 gcal add 休み 2026-09-28 2026-09-29      # 終日（終了日も含む）
@@ -59,6 +65,7 @@ gcal logout work               # アカウントを削除
 ```
 
 アカウントが1つだけなら `-a` は省略できます。
+`--json` は `list` / `add` / `edit` / `delete` / `accounts` で使えます。
 
 ### TUI
 
@@ -93,3 +100,7 @@ gcal logout work               # アカウントを削除
 
 - 表示するのは各アカウントの **primary** カレンダーだけです。
 - 繰り返し予定の編集・削除は、その回の予定だけに反映されます。
+
+## ライセンス
+
+MIT
