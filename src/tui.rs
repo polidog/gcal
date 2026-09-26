@@ -8,6 +8,7 @@ use ratatui::style::{Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Clear, List, ListState, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
+use std::collections::HashMap;
 
 const DAYS: i64 = 7;
 const HELP: &str = " j/k:移動 h/l:前後の週 t:今日 Tab:アカウント a:追加 e:編集 d:削除 x:不参加も表示 r:再読込 o:ブラウザ q:終了";
@@ -30,9 +31,11 @@ struct Form {
 
 struct App {
     accounts: Vec<String>,
-    filter: usize, // 0 = 全アカウント
+    filter: Option<usize>, // None = 全アカウント
     from: NaiveDate,
     events: Vec<Event>,
+    /// 週の初日ごとの取得結果。h/l で行き来しても取り直さない。r・保存・削除で捨てる
+    cache: HashMap<NaiveDate, Vec<Event>>,
     state: ListState,
     status: String,
     mode: Mode,
@@ -46,15 +49,16 @@ pub fn run() -> Result<()> {
     }
     let mut app = App {
         accounts,
-        filter: 0,
+        filter: None,
         from: Local::now().date_naive(),
         events: vec![],
+        cache: HashMap::new(),
         state: ListState::default().with_selected(Some(0)),
         status: String::new(),
         mode: Mode::Normal,
         show_declined: false,
     };
-    app.reload();
+    app.load();
     let mut term = ratatui::init();
     let r = app.run(&mut term);
     ratatui::restore();
@@ -63,16 +67,35 @@ pub fn run() -> Result<()> {
 
 impl App {
     // ponytail: 取得中は画面が止まる。気になったら別スレッド化
-    fn reload(&mut self) {
+    fn load(&mut self) {
+        if let Some(events) = self.cache.get(&self.from) {
+            self.events = events.clone();
+            self.status.clear();
+            return;
+        }
         let (events, errors) = api::list_all(&self.accounts, self.from, DAYS);
+        // 一部失敗した週は覚えない（戻ってきたときに取り直す）
+        if errors.is_empty() {
+            self.cache.insert(self.from, events.clone());
+        }
         self.events = events;
         self.status = errors.join(" / ");
     }
 
+    fn reload(&mut self) {
+        self.cache.clear();
+        self.load();
+    }
+
+    fn account(&self) -> Option<&str> {
+        self.filter.map(|i| self.accounts[i].as_str())
+    }
+
     fn visible(&self) -> Vec<&Event> {
+        let account = self.account();
         self.events
             .iter()
-            .filter(|e| self.filter == 0 || e.account == self.accounts[self.filter - 1])
+            .filter(|e| account.is_none_or(|a| e.account == a))
             .filter(|e| self.show_declined || !e.declined())
             .collect()
     }
@@ -84,7 +107,7 @@ impl App {
     fn move_week(&mut self, from: NaiveDate) {
         self.from = from;
         self.state.select(Some(0));
-        self.reload();
+        self.load();
     }
 
     fn run(&mut self, term: &mut DefaultTerminal) -> Result<()> {
@@ -116,8 +139,10 @@ impl App {
                         self.status.clear();
                     }
                     KeyCode::Enter => self.submit(),
-                    KeyCode::Tab | KeyCode::Down => form.focus = (form.focus + 1) % 3,
-                    KeyCode::BackTab | KeyCode::Up => form.focus = (form.focus + 2) % 3,
+                    KeyCode::Tab | KeyCode::Down => form.focus = (form.focus + 1) % LABELS.len(),
+                    KeyCode::BackTab | KeyCode::Up => {
+                        form.focus = (form.focus + LABELS.len() - 1) % LABELS.len()
+                    }
                     KeyCode::Backspace => _ = form.fields[form.focus].pop(),
                     KeyCode::Char(c) => form.fields[form.focus].push(c),
                     _ => {}
@@ -133,7 +158,11 @@ impl App {
             KeyCode::Char('j') | KeyCode::Down => self.state.select_next(),
             KeyCode::Char('k') | KeyCode::Up => self.state.select_previous(),
             KeyCode::Tab => {
-                self.filter = (self.filter + 1) % (self.accounts.len() + 1);
+                self.filter = match self.filter {
+                    None => Some(0),
+                    Some(i) if i + 1 < self.accounts.len() => Some(i + 1),
+                    Some(_) => None,
+                };
                 self.state.select(Some(0));
             }
             KeyCode::Char('l') | KeyCode::Right => self.move_week(self.from + Duration::days(DAYS)),
@@ -176,13 +205,13 @@ impl App {
 
     /// 追加先は表示中のアカウント。全アカウント表示で複数あるときは選んでもらう
     fn open_add(&mut self) {
-        let account = match (self.filter, self.accounts.as_slice()) {
-            (0, [only]) => only.clone(),
-            (0, _) => {
+        let account = match (self.account(), self.accounts.as_slice()) {
+            (Some(a), _) => a.to_owned(),
+            (None, [only]) => only.clone(),
+            (None, _) => {
                 self.status = "Tab で追加先のアカウントを選んでから a を押してください".into();
                 return;
             }
-            (i, _) => self.accounts[i - 1].clone(),
         };
         // 選択中の予定の日付を初期値にする（時刻だけ打てばよいように）
         let day = self
@@ -236,11 +265,7 @@ impl App {
             Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
                 .areas(main);
 
-        let who = if self.filter == 0 {
-            "全アカウント"
-        } else {
-            &self.accounts[self.filter - 1]
-        };
+        let who = self.account().unwrap_or("全アカウント");
         let to = self.from + Duration::days(DAYS - 1);
         let declined = if self.show_declined {
             "  不参加も表示中"
@@ -254,8 +279,14 @@ impl App {
         );
         f.render_widget(Line::from(title).bold(), top);
 
-        let items: Vec<String> = self.visible().iter().map(|e| e.line()).collect();
-        let detail = self.selected().map(Event::detail).unwrap_or_default();
+        let visible = self.visible();
+        let detail = self
+            .state
+            .selected()
+            .and_then(|i| visible.get(i))
+            .map(|e| e.detail())
+            .unwrap_or_default();
+        let items: Vec<String> = visible.iter().map(|e| e.to_string()).collect();
         let list = List::new(items)
             .block(Block::bordered().title("予定"))
             .highlight_style(Style::new().reversed())
