@@ -1,6 +1,6 @@
 [package]
 name = "gcal"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Lightweight Google Calendar CLI/TUI with multi-account support"
 repository = "https://github.com/polidog/gcal"
