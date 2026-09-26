@@ -202,14 +202,17 @@ fn param(query: &str, key: &str) -> Option<String> {
 }
 
 fn enc(s: &str) -> String {
+    use std::fmt::Write;
     s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                (b as char).to_string()
+        .fold(String::with_capacity(s.len()), |mut out, b| {
+            match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                    out.push(b as char)
+                }
+                _ => _ = write!(out, "%{b:02X}"),
             }
-            _ => format!("%{b:02X}"),
+            out
         })
-        .collect()
 }
 
 fn dec(s: &str) -> String {

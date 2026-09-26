@@ -99,9 +99,9 @@ fn main() -> Result<()> {
             } else {
                 for e in events {
                     if ids {
-                        println!("{}  {}", e.line(), e.id)
+                        println!("{e}  {}", e.id)
                     } else {
-                        println!("{}", e.line())
+                        println!("{e}")
                     }
                 }
             }
@@ -171,6 +171,6 @@ fn show(json: bool, msg: &str, e: &api::Event) -> Result<()> {
     if json {
         return print_json(e);
     }
-    println!("{msg}: {}", e.line());
+    println!("{msg}: {e}");
     Ok(())
 }

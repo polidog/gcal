@@ -3,6 +3,9 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate, NaiveDateTime};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::sync::LazyLock;
+use std::thread;
 use ureq::{Agent, Body, http::Response};
 
 const EVENTS: &str = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
@@ -93,7 +96,20 @@ impl Event {
             .any(|a| a.is_self && a.response_status.as_deref() == Some("declined"))
     }
 
-    pub fn line(&self) -> String {
+    pub fn detail(&self) -> String {
+        [&self.hangout_link, &self.location, &self.description]
+            .into_iter()
+            .flatten()
+            .fold(
+                format!("{}\n\n{self}\n{}", self.summary, self.account),
+                |s, v| s + "\n\n" + v,
+            )
+    }
+}
+
+/// 一覧の1行
+impl fmt::Display for Event {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let s = self.start.local();
         let wd =
             ["月", "火", "水", "木", "金", "土", "日"][s.weekday().num_days_from_monday() as usize];
@@ -101,23 +117,13 @@ impl Event {
             Some(_) => format!("{}-{}", s.format("%H:%M"), self.end.local().format("%H:%M")),
             None => "終日       ".into(),
         };
-        format!(
+        write!(
+            f,
             "{}({wd}) {time} [{}] {}",
             s.format("%m/%d"),
             self.account,
             self.summary
         )
-    }
-
-    pub fn detail(&self) -> String {
-        let mut s = format!("{}\n\n{}\n{}", self.summary, self.line(), self.account);
-        for v in [&self.hangout_link, &self.location, &self.description]
-            .into_iter()
-            .flatten()
-        {
-            s += &format!("\n\n{v}");
-        }
-        s
     }
 }
 
@@ -129,11 +135,15 @@ pub fn midnight(d: NaiveDate) -> DateTime<Local> {
         .expect("深夜0時が存在しないタイムゾーン")
 }
 
-pub fn agent() -> Agent {
-    Agent::config_builder()
-        .http_status_as_error(false)
-        .build()
-        .into()
+/// 使い回して TLS 接続をプールする（ページ送り・トークン更新で握手し直さない）
+pub fn agent() -> &'static Agent {
+    static AGENT: LazyLock<Agent> = LazyLock::new(|| {
+        Agent::config_builder()
+            .http_status_as_error(false)
+            .build()
+            .into()
+    });
+    &AGENT
 }
 
 /// エラー時は Google が返す本文（API 未有効化などの理由）をそのまま見せる
@@ -189,15 +199,21 @@ fn list(account: &str, from: NaiveDate, days: i64) -> Result<Vec<Event>> {
 
 /// アカウントごとの失敗は errors に積み、取れた分だけ返す
 pub fn list_all(accounts: &[String], from: NaiveDate, days: i64) -> (Vec<Event>, Vec<String>) {
+    let results: Vec<_> = thread::scope(|s| {
+        let handles: Vec<_> = accounts
+            .iter()
+            .map(|a| s.spawn(move || (a, list(a, from, days))))
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
     let (mut events, mut errors) = (vec![], vec![]);
-    // ponytail: アカウントを順番に取得。数が増えて遅ければ thread::scope で並列化
-    for a in accounts {
-        match list(a, from, days) {
+    for (a, r) in results {
+        match r {
             Ok(v) => events.extend(v),
             Err(e) => errors.push(format!("{a}: {e:#}")),
         }
     }
-    events.sort_by_key(|e| e.start.local());
+    events.sort_by_cached_key(|e| e.start.local());
     (events, errors)
 }
 
